@@ -102,6 +102,13 @@ def handle_news_retrieval(event):
                 KeyConditionExpression=Key('Ticker').eq(ticker)
             )
 
+        if not response['Items']:
+            return {
+                'statusCode': 200,
+                'body': json.dumps({}),
+                'headers': {'Content-Type': 'application/json'}
+            }
+
         processed_items = []
         for item in response['Items']:
             processed_item = {}

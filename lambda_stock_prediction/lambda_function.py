@@ -5,7 +5,7 @@ import joblib
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import traceback  # Importe o módulo traceback
+import traceback
 from sklearn.preprocessing import MinMaxScaler
 from boto3.dynamodb.conditions import Key
 from pandas import to_datetime
@@ -68,11 +68,18 @@ def handler(event, context):
         df = pd.DataFrame(data)
         df['Date'] = pd.to_datetime(df['Date'])
 
-        # Filtrar dados até initial_date
+        # Filtrar dados até initial_date (inclusive)
         original_df = df.copy()
-        df = df[df['Date'] < initial_date]
+        df = df[df['Date'] <= initial_date]
 
-        df['Date'] = pd.to_datetime(df['Date'])
+        # Verificar se há dados após o filtro
+        if df.empty:
+            return {
+                'statusCode': 200,
+                'body': json.dumps([])
+            }
+
+        # Processamento dos dados
         df['Day'] = df['Date'].dt.day
         df['Month'] = df['Date'].dt.month
         df['Year'] = df['Date'].dt.year
@@ -81,10 +88,21 @@ def handler(event, context):
         df['Year_enc'] = df['Year'].apply(cos_encode, max_val=2023)
         X = df[['ClosePrice', 'Day_enc', 'Month_enc', 'Year_enc']].values
 
-        # Carregar scalers e modelo do S3
-        scaler_X = load_from_s3('companies-ticker', 'scaler_X.pkl')
-        scaler_y = load_from_s3('companies-ticker', 'scaler_y.pkl')
-        model = load_from_s3('companies-ticker', 'esn_model.pkl')
+        # Nomes dos arquivos específicos para o ticker
+        model_file_name = f'modelos/esn_model_{ticker}.pkl'
+        scaler_x_file_name = f'modelos/scaler_X_{ticker}.pkl'
+        scaler_y_file_name = f'modelos/scaler_y_{ticker}.pkl'
+
+        # Tentar carregar scalers e modelo do S3, caso contrário, retorne erro
+        try:
+            scaler_X = load_from_s3('companies-ticker', scaler_x_file_name)
+            scaler_y = load_from_s3('companies-ticker', scaler_y_file_name)
+            model = load_from_s3('companies-ticker', model_file_name)
+        except Exception as e:
+            return {
+                'statusCode': 404,
+                'body': json.dumps(f"Modelo ou scalers não encontrados para o ticker {ticker}")
+            }
 
         # Normalização dos dados de entrada
         X_scaled = scaler_X.transform(X)
@@ -145,7 +163,7 @@ def handler(event, context):
                 'Prediction': predicted_price
             }
 
-             # Verificar se o índice está dentro dos limites do DataFrame
+            # Verificar se o índice está dentro dos limites do DataFrame
             if last_index + i + 1 < len(original_df):
                 result_entry['ClosePrice'] = original_df.iloc[last_index + i + 1]['ClosePrice']
 
